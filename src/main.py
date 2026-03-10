@@ -1,6 +1,7 @@
 import time
 import re
 from agent.llm_client import LLMClient
+from agent.memory import Memory
 from tools.vision import capture_screen_base64
 from tools.controller import click, type_text, press_key, scroll
 from tools.commander import run_command
@@ -10,7 +11,7 @@ def parse_action(action_str: str):
     Parses a string formatted like `ACTION(args)`
     Raises ValueError if format is incorrect.
     """
-    match = re.search(r"([A-Z]+)\((.*?)\)", action_str)
+    match = re.search(r"([A-Z_]+)\((.*?)\)", action_str)
     if not match:
         raise ValueError(f"Could not parse action format: {action_str}")
     
@@ -18,7 +19,7 @@ def parse_action(action_str: str):
     args = match.group(2)
     return cmd, args
 
-def execute_action(action: str, args: str):
+def execute_action(action: str, args: str, memory: Memory):
     """
     Routes the parsed action to the appropriate tool.
     """
@@ -35,6 +36,12 @@ def execute_action(action: str, args: str):
         print(f"⚠️ Security Warning: Running command `{args}`")
         # In a real MVP, wait for user confirmation here
         return run_command(args)
+    elif action == "MEM_SAVE":
+        parts = args.split(",", 1)
+        if len(parts) == 2:
+            return memory.save_memory(parts[0].strip(), parts[1].strip())
+        else:
+            return memory.save_memory("general_note", args)
     elif action == "DONE":
         return f"Task accomplished: {args}"
     else:
@@ -46,6 +53,7 @@ def run_agent_loop(goal: str, max_steps: int = 15):
     """
     print(f"🚀 Starting NaiveClaw with Goal: '{goal}'")
     client = LLMClient()
+    memory = Memory()
     history = [] # Optional: Can be passed to context to retain memory
     
     for step in range(1, max_steps + 1):
@@ -56,8 +64,9 @@ def run_agent_loop(goal: str, max_steps: int = 15):
             print("[1] Screen captured.")
             
             # 2. Get LLM recommendation
-            print("[2] Analyzing screen and history with LLM...")
-            action_raw = client.get_action(img_b64, goal, history)
+            print("[2] Analyzing screen, memory, and history with LLM...")
+            current_memory = memory.get_all()
+            action_raw = client.get_action(img_b64, goal, history, current_memory)
             print(f"    🧠 LLM decided: {action_raw}")
             
             # 3. Parse action string
@@ -68,7 +77,7 @@ def run_agent_loop(goal: str, max_steps: int = 15):
 
             # 4. Execute action
             print(f"[3] Executing action {action_type} with parameters '{args}'...")
-            result = execute_action(action_type, args)
+            result = execute_action(action_type, args, memory)
             print(f"    🔧 Tool result: {result}")
             
             # (Optional) Update history context
